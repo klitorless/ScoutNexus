@@ -21,24 +21,28 @@ Reddit · YouTube · X · Facebook · …
 The first campaign is a Muse invite. The first platform is Reddit. Neither is
 baked into the architecture — they are just the first entries.
 
-## Current stage — Stage 1: Foundation
+## Current stage — Stage 2: Reddit adapter
 
-- Clean project structure (FastAPI + SQLite + SQLAlchemy + Jinja2)
-- Domain models: **Campaign**, **Source**, **Candidate** (a source is a post;
-  a candidate is the system's judgment that a source fits a campaign)
-- Repository / data-access layer
-- `PlatformAdapter` interface — core logic never touches platform APIs
-- `DiscoveryService`: adapter → normalized sources → candidates
-- Mobile-friendly web UI: opportunity inbox + candidate detail page
-- Deterministic **mock** analysis (keyword-based, HIGH/MEDIUM/LOW confidence —
-  no fake precision, no AI yet)
-- Demo seed data (clearly fictional, no scraping, no real codes)
-- Test suite
+- Everything from Stage 1, plus:
+- `RedditAdapter`: read-only Reddit integration behind the existing
+  `PlatformAdapter` interface (app-only OAuth2, no user password needed)
+- Environment-based credentials (`.env`, gitignored; `.env.example`
+  with placeholders)
+- Reddit → `NormalizedSource` normalization (post ID, subreddit, author,
+  title, selftext, permalink URL, timestamp, engagement metadata)
+- Configurable search: query, subreddit (or site-wide), limit, sort,
+  time filter
+- Explicit error handling: auth failures, 429 rate limits (never
+  aggressively retried), 5xx (bounded retry), timeouts, malformed
+  responses — failures never become valid-looking candidates
+- `python scripts/test_reddit.py`: manual live smoke test (graceful
+  without credentials); automated tests are fully mocked
+- UI shows a small "Reddit: Configured / Not configured" status line
 
-**Not in Stage 1:** no Reddit API connection, no Reddit credentials, no AI
-classification, no automatic posting, no vote manipulation, no fake
-identities, no rule/limit bypassing. Human approval stays in the loop by
-design.
+**Not in Stage 2:** no AI analysis, no semantic relevance, no Muse-specific
+logic in the adapter, no automatic posting/commenting/voting, no
+scheduling. The adapter retrieves and normalizes — it does not judge
+relevance.
 
 ## Setup
 
@@ -93,8 +97,71 @@ pytest -v
 
 Covers: campaign/source/candidate persistence and relationships, the
 NEW → REVIEWED / NEW → DISMISSED lifecycle, all routes (including 404s),
-and architecture guarantees (the discovery pipeline runs against a stub
-adapter with zero Reddit-specific code; no PRAW imports anywhere).
+Reddit adapter behavior (fully mocked — no credentials needed), and
+architecture guarantees (the discovery pipeline runs against a stub
+adapter with zero Reddit-specific code; core layers never import the
+Reddit adapter).
+
+## Reddit integration (Stage 2)
+
+Stage 2 adds a **read-only** Reddit platform adapter (`RedditAdapter`)
+behind the existing `PlatformAdapter` interface. The discovery service,
+candidate system, and database schema are unchanged.
+
+**OpportunityScout does not automatically post to Reddit.** No comments,
+no votes, no messages — read-only by design.
+
+### Getting Reddit credentials
+
+Reddit's API requires OAuth2 even for public read access. OpportunityScout
+uses the application-only `client_credentials` grant (no Reddit user
+password needed):
+
+1. Go to https://www.reddit.com/prefs/apps and click
+   "are you a developer? create an app..."
+2. Choose type **script** (a confidential client that runs on hardware you
+   control, e.g. your laptop). Note your **client ID** (under the app name)
+   and **client secret**.
+3. Copy `.env.example` to `.env` and fill in:
+   - `REDDIT_CLIENT_ID`
+   - `REDDIT_CLIENT_SECRET`
+   - `REDDIT_USER_AGENT` — Reddit *requires* a descriptive User-Agent in
+     the form `<platform>:<app-id>:<version> (by /u/<your-username>)`.
+     Generic agents get throttled or rejected.
+
+`.env` is gitignored. Never commit real credentials.
+
+### Running the live smoke test
+
+```bash
+python scripts/test_reddit.py [--query "..."] [--subreddit python] [--limit 3]
+```
+
+Authenticates, runs one small read-only search, prints safe metadata
+(title, subreddit, author, URL — never credentials), and exits. It fails
+gracefully with `SKIP` when credentials are not configured. The automated
+test suite (`pytest`) never needs credentials.
+
+### Reddit API notes (verified against official docs, 2026)
+
+- Token endpoint: `POST https://www.reddit.com/api/v1/access_token`
+  (HTTP Basic `client_id:client_secret`, `grant_type=client_credentials`).
+- Data endpoints live at `https://oauth.reddit.com` with
+  `Authorization: Bearer <token>` — not `www.reddit.com`.
+- App-only tokens expire after ~1 hour (`expires_in`); there is no refresh
+  token, so the adapter re-requests one automatically (with a 60s margin).
+- Rate limit is ~60 requests/minute for OAuth. Responses include
+  `X-Ratelimit-Used/Remaining/Reset` headers, which the adapter tracks;
+  on HTTP 429 it raises a dedicated error instead of retrying.
+- Search: `GET /search` (site-wide) or `GET /r/{subreddit}/search` with
+  `restrict_sr=1`. Sorts: `relevance`, `new`, `hot`, `top`, `comments`.
+  Time filters: `hour`, `day`, `week`, `month`, `year`, `all`.
+- Post URLs are built as `https://www.reddit.com/comments/<id>/`, which
+  Reddit redirects to the full permalink.
+- Since 2025, Reddit's Responsible Builder Policy may require explicit
+  approval before new API access is granted — if token requests fail with
+  a fresh app, check your app's approval status. Unauthenticated public
+  JSON endpoints are blocked; OAuth is the only supported path.
 
 ## Project structure
 
@@ -118,8 +185,8 @@ opportunityscout/
 
 ## Roadmap (conceptual, may change)
 
-- **Stage 1** — Foundation + demo UI *(current)*
-- **Stage 2** — Reddit API adapter
+- **Stage 1** — Foundation + demo UI
+- **Stage 2** — Reddit API adapter *(current — read-only)*
 - **Stage 3** — Reddit discovery / filtering
 - **Stage 4** — AI relevance / intent analysis
 - **Stage 5** — Candidate review workflow

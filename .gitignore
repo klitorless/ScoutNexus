@@ -12,6 +12,9 @@ data/*.db-journal
 data/*.db-wal
 data/*.db-shm
 
+# Local secrets — never commit
+.env
+
 # Pytest
 .pytest_cache/
 

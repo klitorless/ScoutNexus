@@ -17,6 +17,7 @@
 {% if demo_mode %}
 <div class="demo-banner">Demo data — no real platform connection. Nothing here is a real post.</div>
 {% endif %}
+<div class="platform-status">Reddit: {{ reddit_status }}</div>
 <main class="container">
 {% block content %}{% endblock %}
 </main>

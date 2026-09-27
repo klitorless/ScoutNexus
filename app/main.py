@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import Base, make_engine, make_session_factory
 from app.models import Candidate, CandidateStatus
+from app.platforms import reddit_status
 from app.repositories.candidate_repository import CandidateRepository
 from app.repositories.campaign_repository import CampaignRepository
 
@@ -75,6 +76,11 @@ def get_campaign_repo(db: Session = Depends(get_db)) -> CampaignRepository:
     return CampaignRepository(db)
 
 
+def _shared_context() -> dict:
+    """Template variables needed on every page."""
+    return {"demo_mode": settings.demo_mode, "reddit_status": reddit_status()}
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title=settings.app_name)
     app.mount("/static", StaticFiles(directory=str(APP_DIR / "static")), name="static")
@@ -105,7 +111,7 @@ def create_app() -> FastAPI:
                 "counts": counts,
                 "active_filter": status_filter.value if status_filter else "ALL",
                 "statuses": [s.value for s in CandidateStatus],
-                "demo_mode": settings.demo_mode,
+                **_shared_context(),
             },
         )
 
@@ -121,7 +127,7 @@ def create_app() -> FastAPI:
         return templates.TemplateResponse(
             request,
             "candidate_detail.html",
-            {"candidate": candidate, "demo_mode": settings.demo_mode},
+            {"candidate": candidate, **_shared_context()},
         )
 
     @app.post("/candidates/{candidate_id}/review")
@@ -159,13 +165,13 @@ def create_app() -> FastAPI:
         return templates.TemplateResponse(
             request,
             "campaigns.html",
-            {"campaigns": campaigns, "demo_mode": settings.demo_mode},
+            {"campaigns": campaigns, **_shared_context()},
         )
 
     @app.exception_handler(404)
     async def not_found_handler(request: Request, exc: HTTPException):
         return templates.TemplateResponse(
-            request, "404.html", {"demo_mode": settings.demo_mode}, status_code=404
+            request, "404.html", _shared_context(), status_code=404
         )
 
     return app
