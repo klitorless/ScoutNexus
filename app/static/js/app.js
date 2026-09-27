@@ -1,4 +1,4 @@
-// OpportunityScout — tiny progressive enhancement. Forms work without JS.
+// ScoutNexus — tiny progressive enhancement. Forms work without JS.
 document.addEventListener("DOMContentLoaded", () => {
   document.querySelectorAll("form[data-confirm]").forEach((form) => {
     form.addEventListener("submit", (event) => {

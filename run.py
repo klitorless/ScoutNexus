@@ -1,6 +1,6 @@
 """Local dev entrypoint.
 
-Run the OpportunityScout web UI with:
+Run the ScoutNexus web UI with:
 
     python run.py
 """

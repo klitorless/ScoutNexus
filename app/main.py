@@ -1,4 +1,4 @@
-"""OpportunityScout web application (Stage 1).
+"""ScoutNexus web application.
 
 Routes:
     GET  /                        -> redirect to the opportunity inbox

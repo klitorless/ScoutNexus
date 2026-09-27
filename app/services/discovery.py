@@ -1,16 +1,26 @@
-"""Discovery service: adapter -> normalized sources -> candidates.
+"""Discovery service: adapter -> normalized sources -> persisted sources.
+
+Two separate concerns, kept explicit:
+
+1. discover_sources(): platform discovery -> stored Source rows.
+   Needs no campaign. A Source is "a thing someone posted somewhere".
+
+2. create_candidate_for_source(): evaluate one stored Source for one
+   Campaign -> Candidate. A Candidate is "a source that may represent an
+   opportunity for a particular campaign". Discovering a source must NOT
+   inherently mean creating a candidate.
+
+The deterministic keyword analysis below is Stage 1 scaffolding. A future
+stage replaces it with real relevance analysis; the surrounding pipeline
+does not change.
 
 The service only talks to the PlatformAdapter interface — it knows nothing
-about Reddit's API (or any platform's API). For each discovered source it
-runs a deterministic, keyword-based mock analysis and persists a Candidate.
-
-The mock analysis is a Stage 1 placeholder. Stage 4 replaces it with real
-relevance/intent analysis; the surrounding pipeline does not change.
+about Reddit's API (or any platform's API).
 """
 
 from __future__ import annotations
 
-from app.models import Campaign, Candidate, Confidence
+from app.models import Campaign, Candidate, Confidence, Source
 from app.platforms.base import NormalizedSource, PlatformAdapter
 from app.repositories.candidate_repository import CandidateRepository
 from app.repositories.source_repository import SourceRepository
@@ -93,8 +103,23 @@ def analyze_source_for_campaign(
     }
 
 
+def source_to_normalized(source: Source) -> NormalizedSource:
+    """Rebuild the platform-agnostic view of a persisted source."""
+    return NormalizedSource(
+        platform=source.platform,
+        source_id=source.source_id,
+        community=source.community,
+        author=source.author,
+        title=source.title,
+        content=source.content,
+        url=source.url,
+        posted_at=source.posted_at,
+        engagement=dict(source.engagement) if source.engagement else {},
+    )
+
+
 class DiscoveryService:
-    """Turns platform discovery into persisted candidates for a campaign."""
+    """Separates source discovery from campaign evaluation."""
 
     def __init__(
         self,
@@ -106,18 +131,18 @@ class DiscoveryService:
         self.source_repo = source_repo
         self.candidate_repo = candidate_repo
 
-    def discover_for_campaign(
+    def discover_sources(
         self,
-        campaign: Campaign,
         queries: list[str],
         limit_per_query: int = 10,
-    ) -> list[Candidate]:
-        """Run discovery queries and persist new candidates.
+    ) -> list[Source]:
+        """Discover posts and persist them as Sources. No campaign required.
 
         Idempotent: re-running the same queries will not duplicate sources
-        or candidates for the same (campaign, source) pair.
+        for the same (platform, source_id) pair.
         """
-        candidates: list[Candidate] = []
+        sources: list[Source] = []
+        seen_ids: set[int] = set()
         for query in queries:
             for normalized in self.adapter.discover(query, limit=limit_per_query):
                 source, _ = self.source_repo.upsert(
@@ -131,14 +156,46 @@ class DiscoveryService:
                     posted_at=normalized.posted_at,
                     engagement=normalized.engagement,
                 )
-                if self.candidate_repo.get_for_campaign_source(campaign.id, source.id):
-                    continue
-                analysis = analyze_source_for_campaign(normalized, campaign)
-                candidates.append(
-                    self.candidate_repo.create(
-                        campaign_id=campaign.id,
-                        source_id=source.id,
-                        **analysis,
-                    )
-                )
+                if source.id not in seen_ids:
+                    seen_ids.add(source.id)
+                    sources.append(source)
+        return sources
+
+    def create_candidate_for_source(
+        self,
+        source: Source,
+        campaign: Campaign,
+    ) -> Candidate | None:
+        """Evaluate one stored source for one campaign.
+
+        Returns the new Candidate, or None if this (campaign, source) pair
+        already has one. Evaluation is a separate, explicit step — discovery
+        alone never creates candidates.
+        """
+        if self.candidate_repo.get_for_campaign_source(campaign.id, source.id):
+            return None
+        analysis = analyze_source_for_campaign(
+            source_to_normalized(source), campaign
+        )
+        return self.candidate_repo.create(
+            campaign_id=campaign.id,
+            source_id=source.id,
+            **analysis,
+        )
+
+    def discover_for_campaign(
+        self,
+        campaign: Campaign,
+        queries: list[str],
+        limit_per_query: int = 10,
+    ) -> list[Candidate]:
+        """Convenience: discover sources, then evaluate each for the campaign.
+
+        Idempotent: re-running the same queries creates nothing new.
+        """
+        candidates: list[Candidate] = []
+        for source in self.discover_sources(queries, limit_per_query):
+            candidate = self.create_candidate_for_source(source, campaign)
+            if candidate is not None:
+                candidates.append(candidate)
         return candidates

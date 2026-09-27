@@ -1,48 +1,58 @@
-# OpportunityScout
+# ScoutNexus
 
-OpportunityScout is a **platform-independent opportunity discovery system**.
+ScoutNexus is a **platform-independent opportunity discovery system**.
 
 The idea: you provide an offer — an invite code, referral link, discount,
-promo, beta invite, or similar campaign — and OpportunityScout finds existing
+promo, beta invite, or similar campaign — and ScoutNexus finds existing
 online conversations where that offer may reasonably be useful, presenting
 them to you for **human review**. It is a research assistant, not an
 automation tool: a human always decides what happens next.
 
 ```
-Campaigns / Offers
+Platforms
         ↓
-OpportunityScout Core
+PlatformAdapter
         ↓
-Platform Adapters
+NormalizedSource
         ↓
-Reddit · YouTube · X · Facebook · …
+Source persistence
+        ↓
+Campaign evaluation
+        ↓
+Candidate (Campaign ↔ Source)
 ```
 
-The first campaign is a Muse invite. The first platform is Reddit. Neither is
-baked into the architecture — they are just the first entries.
+## Current stage — Foundation reconciliation / architecture cleanup
 
-## Current stage — Stage 2: Reddit adapter
+The project was renamed from OpportunityScout to ScoutNexus, and the
+foundation was reconciled against the intended architecture:
 
-- Everything from Stage 1, plus:
-- `RedditAdapter`: read-only Reddit integration behind the existing
-  `PlatformAdapter` interface (app-only OAuth2, no user password needed)
-- Environment-based credentials (`.env`, gitignored; `.env.example`
-  with placeholders)
-- Reddit → `NormalizedSource` normalization (post ID, subreddit, author,
-  title, selftext, permalink URL, timestamp, engagement metadata)
-- Configurable search: query, subreddit (or site-wide), limit, sort,
-  time filter
-- Explicit error handling: auth failures, 429 rate limits (never
-  aggressively retried), 5xx (bounded retry), timeouts, malformed
-  responses — failures never become valid-looking candidates
-- `python scripts/test_reddit.py`: manual live smoke test (graceful
-  without credentials); automated tests are fully mocked
-- UI shows a small "Reddit: Configured / Not configured" status line
+- **Source vs Candidate separation.** Platform discovery now persists
+  `Source` rows without requiring a campaign
+  (`DiscoveryService.discover_sources()`). Evaluating a stored source for
+  a campaign (`DiscoveryService.create_candidate_for_source()`) is a
+  separate, explicit step. Discovering a source never implies candidacy.
+  `discover_for_campaign()` is a convenience that composes the two steps.
+- **Deduplication.** Sources are unique on `(platform, source_id)` — the
+  same post found by multiple queries is stored once. Candidates are
+  unique per (campaign, source) pair, so one source can back candidates
+  for many campaigns without duplicating the source.
+- **Platform abstraction preserved.** Core services only talk to the
+  `PlatformAdapter` interface; `NormalizedSource` is the boundary.
+  No Reddit-specific imports outside `app/platforms/reddit.py`.
+- **Web UI verified complete.** Mobile-first Jinja2 inbox with candidate
+  list/detail, review/dismiss actions, campaign list, and static assets.
+- **Naming.** User-facing name is now ScoutNexus. New configuration uses
+  `SCOUTNEXUS_*` environment variables; legacy `OPPORTUNITYSCOUT_*`
+  variables are still honored as a fallback (see Configuration).
+- **Reddit adapter intact.** Read-only `RedditAdapter` behind
+  `PlatformAdapter` (app-only OAuth2, no user password needed), with
+  explicit error handling and fully mocked tests.
 
-**Not in Stage 2:** no AI analysis, no semantic relevance, no Muse-specific
-logic in the adapter, no automatic posting/commenting/voting, no
-scheduling. The adapter retrieves and normalizes — it does not judge
-relevance.
+**Not implemented:** Stage 3 Reddit discovery/filtering, AI or semantic
+relevance analysis, response drafting, automatic posting/commenting/
+voting, scheduling, notifications, or additional platforms. The mock
+keyword analysis from Stage 1 remains as clearly-labeled scaffolding.
 
 ## Setup
 
@@ -69,14 +79,18 @@ re-seed the demo data.
 
 ### Configuration
 
-Environment variables (all optional):
+Environment variables (all optional). `SCOUTNEXUS_*` is preferred;
+the original `OPPORTUNITYSCOUT_*` names still work as a fallback.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `OPPORTUNITYSCOUT_DATABASE_URL` | `sqlite:///data/opportunityscout.db` | Database URL |
-| `OPPORTUNITYSCOUT_HOST` | `127.0.0.1` | Bind host |
-| `OPPORTUNITYSCOUT_PORT` | `8000` | Bind port |
-| `OPPORTUNITYSCOUT_DEMO` | `true` | Show the "demo data" banner |
+| `SCOUTNEXUS_DATABASE_URL` | `sqlite:///data/opportunityscout.db` | Database URL |
+| `SCOUTNEXUS_HOST` | `127.0.0.1` | Bind host |
+| `SCOUTNEXUS_PORT` | `8000` | Bind port |
+| `SCOUTNEXUS_DEMO` | `true` | Show the "demo data" banner |
+
+The default database filename keeps the original `opportunityscout.db`
+name so existing local data is not orphaned by the rename.
 
 ## Routes
 
@@ -92,28 +106,30 @@ Environment variables (all optional):
 ## Tests
 
 ```bash
-pytest -v
+pytest -q
 ```
 
 Covers: campaign/source/candidate persistence and relationships, the
 NEW → REVIEWED / NEW → DISMISSED lifecycle, all routes (including 404s),
+the Source/Candidate separation (discovery without a campaign,
+cross-query deduplication, one source backing many campaigns),
 Reddit adapter behavior (fully mocked — no credentials needed), and
 architecture guarantees (the discovery pipeline runs against a stub
 adapter with zero Reddit-specific code; core layers never import the
 Reddit adapter).
 
-## Reddit integration (Stage 2)
+## Reddit integration
 
-Stage 2 adds a **read-only** Reddit platform adapter (`RedditAdapter`)
-behind the existing `PlatformAdapter` interface. The discovery service,
-candidate system, and database schema are unchanged.
+A **read-only** Reddit platform adapter (`RedditAdapter`) lives behind
+the `PlatformAdapter` interface. The discovery service, candidate system,
+and database schema are platform-independent.
 
-**OpportunityScout does not automatically post to Reddit.** No comments,
+**ScoutNexus does not automatically post to Reddit.** No comments,
 no votes, no messages — read-only by design.
 
 ### Getting Reddit credentials
 
-Reddit's API requires OAuth2 even for public read access. OpportunityScout
+Reddit's API requires OAuth2 even for public read access. ScoutNexus
 uses the application-only `client_credentials` grant (no Reddit user
 password needed):
 
@@ -173,10 +189,11 @@ opportunityscout/
 │   ├── models/                 # Campaign, Source, Candidate
 │   ├── repositories/           # data-access layer
 │   ├── services/               # DiscoveryService + mock analysis
-│   ├── platforms/              # PlatformAdapter interface, mock adapter
+│   ├── platforms/              # PlatformAdapter interface, mock + Reddit adapters
 │   ├── templates/              # Jinja2 templates (mobile-friendly)
 │   └── static/                 # vanilla CSS/JS
 ├── scripts/seed_demo.py        # demo data seeder
+├── scripts/test_reddit.py      # live Reddit smoke test (optional credentials)
 ├── tests/                      # pytest suite
 ├── data/                       # SQLite database lives here (gitignored)
 ├── requirements.txt
@@ -185,9 +202,11 @@ opportunityscout/
 
 ## Roadmap (conceptual, may change)
 
-- **Stage 1** — Foundation + demo UI
-- **Stage 2** — Reddit API adapter *(current — read-only)*
-- **Stage 3** — Reddit discovery / filtering
+- **Stage 1** — Foundation + demo UI *(done)*
+- **Stage 2** — Reddit API adapter, read-only *(done)*
+- **Reconciliation** — Source/Candidate separation, web layer repair,
+  ScoutNexus rename *(done — current)*
+- **Stage 3** — Reddit discovery / filtering *(next, not started)*
 - **Stage 4** — AI relevance / intent analysis
 - **Stage 5** — Candidate review workflow
 - **Stage 6** — Response drafting (human-approved)
@@ -197,7 +216,7 @@ opportunityscout/
 
 ## Product boundaries
 
-OpportunityScout will not implement automatic mass posting, spam behavior,
+ScoutNexus will not implement automatic mass posting, spam behavior,
 fake identities, vote manipulation, or methods for bypassing subreddit
 rules, rate limits, moderation, or platform restrictions. Human approval
 remains part of any future response workflow.

@@ -39,7 +39,7 @@ class Source(Base):
     posted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     # Flexible platform-specific metadata, e.g. {"comments": 18, "score": 42}.
     engagement: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
-    # When OpportunityScout ingested this source.
+    # When ScoutNexus ingested this source.
     created_at: Mapped[datetime] = mapped_column(default=datetime.now, nullable=False)
 
     candidates: Mapped[list["Candidate"]] = relationship(

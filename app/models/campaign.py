@@ -1,7 +1,7 @@
 """Campaign / offer model.
 
 A campaign is platform-independent: it describes an offer (invite, referral,
-discount, ...) that OpportunityScout tries to match against conversations
+discount, ...) that ScoutNexus tries to match against conversations
 found on any platform. Muse is just the first campaign; the model knows
 nothing Muse-specific.
 """

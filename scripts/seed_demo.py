@@ -1,4 +1,4 @@
-"""Seed demo data for OpportunityScout (Stage 1).
+"""Seed demo data for ScoutNexus.
 
 Creates:
   - a demo "Muse Invite" campaign with FAKE credentials
@@ -87,7 +87,7 @@ def seed(session, reset: bool = False) -> dict[str, int]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Seed OpportunityScout demo data.")
+    parser = argparse.ArgumentParser(description="Seed ScoutNexus demo data.")
     parser.add_argument("--reset", action="store_true", help="Wipe demo data and re-seed.")
     args = parser.parse_args()
 
