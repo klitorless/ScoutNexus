@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}{{ candidate.source.title or "Candidate" }} — OpportunityScout{% endblock %}
+{% block content %}
+<p><a href="/candidates">← Back to inbox</a></p>
+
+<article class="card detail">
+  <div class="card-meta">
+    <span class="badge platform">{{ candidate.source.platform|upper }}</span>
+    {% if candidate.source.community %}<span class="community">r/{{ candidate.source.community }}</span>{% endif %}
+    <span class="badge status-{{ candidate.status.value|lower }}">{{ candidate.status.value }}</span>
+  </div>
+  <h1>{{ candidate.source.title or "(untitled)" }}</h1>
+  <p class="byline">u/{{ candidate.source.author or "unknown" }} · {{ candidate.source.posted_at|timeago }}</p>
+
+  <dl class="facts">
+    <dt>Campaign</dt><dd>{{ candidate.campaign.name }} ({{ candidate.campaign.offer_type }} · {{ candidate.campaign.service }})</dd>
+    <dt>Engagement</dt>
+    <dd>
+      {% if candidate.source.engagement %}
+        {% for k, v in candidate.source.engagement.items() %}{{ k }}: {{ v }}{% if not loop.last %} · {% endif %}{% endfor %}
+      {% else %}unknown{% endif %}
+    </dd>
+    <dt>Original source</dt>
+    <dd>{% if candidate.source.url %}<a href="{{ candidate.source.url }}" target="_blank" rel="noopener">{{ candidate.source.url }}</a>{% else %}—{% endif %}</dd>
+    <dt>Reviewed</dt><dd>{{ candidate.reviewed_at|timeago if candidate.reviewed_at else "not yet" }}</dd>
+  </dl>
+
+  {% if candidate.source.content %}
+  <h2>Post content</h2>
+  <p class="fulltext">{{ candidate.source.content }}</p>
+  {% endif %}
+
+  <h2>Why the system found it</h2>
+  <p>{{ candidate.why_found }}</p>
+
+  <h2>User need</h2>
+  <p>{{ candidate.user_need }}</p>
+
+  <h2>Potential connection</h2>
+  <p>{{ candidate.potential_connection }}</p>
+
+  {% if candidate.conversation_context %}
+  <h2>Conversation context</h2>
+  <p class="fulltext">{{ candidate.conversation_context }}</p>
+  {% endif %}
+
+  <h2>Confidence &amp; evidence</h2>
+  <p><span class="badge conf-{{ candidate.confidence.value|lower }}">{{ candidate.confidence.value }}</span></p>
+  <p>{{ candidate.evidence_quality }}</p>
+
+  <div class="actions">
+    {% if candidate.source.url %}<a class="btn" href="{{ candidate.source.url }}" target="_blank" rel="noopener">Open Original Post</a>{% endif %}
+    {% if candidate.status.value == "NEW" %}
+    <form method="post" action="/candidates/{{ candidate.id }}/review"><button class="btn primary" type="submit">Mark Reviewed</button></form>
+    {% endif %}
+    {% if candidate.status.value != "DISMISSED" %}
+    <form method="post" action="/candidates/{{ candidate.id }}/dismiss" data-confirm="Dismiss this candidate?"><button class="btn danger" type="submit">Dismiss</button></form>
+    {% endif %}
+  </div>
+</article>
+{% endblock %}

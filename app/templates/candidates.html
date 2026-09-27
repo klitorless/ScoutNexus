@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Inbox — OpportunityScout{% endblock %}
+{% block content %}
+<h1>Opportunity Inbox</h1>
+<p class="muted">Conversations the system flagged for human review. Nothing is posted automatically.</p>
+
+<div class="filters">
+  <a class="chip {% if active_filter == 'ALL' %}active{% endif %}" href="/candidates">All</a>
+  {% for s in statuses %}
+  <a class="chip {% if active_filter == s %}active{% endif %}" href="/candidates?status={{ s|lower }}">{{ s|title }}</a>
+  {% endfor %}
+</div>
+
+{% if not candidates %}
+<p class="muted">No candidates{% if active_filter != 'ALL' %} with status {{ active_filter }}{% endif %}. Run <code>python scripts/seed_demo.py</code> to load demo data.</p>
+{% endif %}
+
+{% for c in candidates %}
+<article class="card">
+  <div class="card-meta">
+    <span class="badge platform">{{ c.source.platform|upper }}</span>
+    {% if c.source.community %}<span class="community">r/{{ c.source.community }}</span>{% endif %}
+    <span class="badge status-{{ c.status.value|lower }}">{{ c.status.value }}</span>
+  </div>
+  <h2 class="card-title"><a href="/candidates/{{ c.id }}">{{ c.source.title or "(untitled)" }}</a></h2>
+  <p class="byline">u/{{ c.source.author or "unknown" }} · {{ c.source.posted_at|timeago }}
+    {% if c.source.comment_count() is not none %}· {{ c.source.comment_count() }} comments{% endif %}
+  </p>
+  {% if c.source.content %}<p class="preview">{{ c.source.content[:220] }}{% if c.source.content|length > 220 %}…{% endif %}</p>{% endif %}
+
+  <div class="reason">
+    <p><strong>Why found</strong><br>{{ c.why_found }}</p>
+    <p><strong>User need</strong><br>{{ c.user_need }}</p>
+    <p><strong>Potential connection</strong><br>{{ c.potential_connection }}</p>
+  </div>
+
+  <div class="card-foot">
+    <span class="badge conf-{{ c.confidence.value|lower }}" title="{{ c.evidence_quality }}">{{ c.confidence.value }} confidence</span>
+    <span class="muted small">for “{{ c.campaign.name }}”</span>
+  </div>
+
+  <div class="actions">
+    {% if c.status.value == "NEW" %}
+    <form method="post" action="/candidates/{{ c.id }}/review"><button class="btn primary" type="submit">Review</button></form>
+    {% endif %}
+    {% if c.source.url %}<a class="btn" href="{{ c.source.url }}" target="_blank" rel="noopener">Open Post</a>{% endif %}
+    {% if c.status.value not in ("DISMISSED",) %}
+    <form method="post" action="/candidates/{{ c.id }}/dismiss" data-confirm="Dismiss this candidate?"><button class="btn danger" type="submit">Dismiss</button></form>
+    {% endif %}
+    <a class="btn" href="/candidates/{{ c.id }}">Details</a>
+  </div>
+</article>
+{% endfor %}
+{% endblock %}

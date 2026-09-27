@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Campaigns — OpportunityScout{% endblock %}
+{% block content %}
+<h1>Campaigns</h1>
+<p class="muted">Offers OpportunityScout is watching for. Campaigns are platform-independent.</p>
+
+{% for camp in campaigns %}
+<article class="card">
+  <div class="card-meta">
+    <span class="badge">{{ camp.offer_type }}</span>
+    {% if camp.active %}<span class="badge status-new">ACTIVE</span>{% else %}<span class="badge status-dismissed">INACTIVE</span>{% endif %}
+  </div>
+  <h2 class="card-title">{{ camp.name }}</h2>
+  <p class="byline">{{ camp.service }}</p>
+  {% if camp.description %}<p>{{ camp.description }}</p>{% endif %}
+  <dl class="facts">
+    <dt>Created</dt><dd>{{ camp.created_at|timeago }}</dd>
+  </dl>
+</article>
+{% else %}
+<p class="muted">No campaigns yet. Run <code>python scripts/seed_demo.py</code> to load the demo campaign.</p>
+{% endfor %}
+{% endblock %}
