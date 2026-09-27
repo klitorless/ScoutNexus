@@ -22,7 +22,35 @@ Campaign evaluation
 Candidate (Campaign ↔ Source)
 ```
 
-## Current stage — Stage 3: controlled Reddit discovery & source ingestion
+## Current stage — Stage 4: Reddit OAuth account connection
+
+Stage 4 adds a dedicated user-authorized Reddit OAuth layer (authorization-
+code flow against a *web* Reddit app), separate from the Stage 2/3
+application-level credentials:
+
+```
+Connect Reddit
+        ↓
+Reddit authorization page (official reddit.com)
+        ↓
+/auth/reddit/callback → state validation → code exchange
+        ↓
+authenticated identity (/api/v1/me) → server-side RedditConnection
+```
+
+- **Two credential systems, not conflated.** Discovery keeps using the
+  Stage 2 *script*-app credentials (`REDDIT_CLIENT_ID`, client-credentials
+  grant). User OAuth uses a separate *web*-app registration
+  (`SCOUTNEXUS_REDDIT_CLIENT_ID/SECRET/REDIRECT_URI`, authorization-code
+  flow). The README section "Reddit OAuth account connection" below
+  documents both.
+- **Secure by construction.** Cryptographically random single-use state
+  (10-minute TTL); no token exchange unless state validates; tokens live
+  server-side in SQLite and never appear in HTML, logs, or URLs.
+- Discovery is unchanged and still uses application-level credentials —
+  the connected account is for identity and future stages.
+
+## Previous stage — Stage 3: controlled Reddit discovery & source ingestion
 
 Stage 3 builds a controlled, testable Reddit discovery layer on top of the
 reconciled foundation:
@@ -251,6 +279,91 @@ test suite (`pytest`) never needs credentials.
   a fresh app, check your app's approval status. Unauthenticated public
   JSON endpoints are blocked; OAuth is the only supported path.
 
+### Reddit OAuth account connection (Stage 4)
+
+Stage 4 adds user-authorized account connection, **separate from the
+app-level credentials above**. The discovery pipeline still uses the
+`REDDIT_*` script-app credentials; user OAuth is a second Reddit app
+registration used only for the account link.
+
+**Architecture.** OAuth concerns live in the service layer
+(`app/services/reddit_oauth.py`), persistence in
+`app/repositories/reddit_connection_repository.py` (`RedditConnection`
+model: `reddit_username`, tokens, expiry, scopes). Shared Reddit error
+types live in `app/platforms/base.py` so the service layer never imports
+the adapter implementation. No new dependencies.
+
+**Setup** (web app, authorization-code flow):
+
+1. Go to https://www.reddit.com/prefs/apps and create a second app of
+   type **web** (a confidential app that authorizes server-side flows —
+   do **not** reuse the script-app credentials).
+2. Set its redirect URI to exactly the value of
+   `SCOUTNEXUS_REDDIT_REDIRECT_URI` (default
+   `http://127.0.0.1:8000/auth/reddit/callback`). Reddit requires an
+   exact match — trailing slashes, ports, and scheme must all agree.
+3. Add to `.env`:
+   - `SCOUTNEXUS_REDDIT_CLIENT_ID`
+   - `SCOUTNEXUS_REDDIT_CLIENT_SECRET`
+   - `SCOUTNEXUS_REDDIT_USER_AGENT` (falls back to `REDDIT_USER_AGENT`)
+   - `SCOUTNEXUS_REDDIT_REDIRECT_URI` (optional; the default is above)
+
+**Flow** (routes: `GET /auth/reddit`, `GET /auth/reddit/callback`,
+`POST /auth/reddit/disconnect`):
+
+1. The app generates a 32-byte cryptographically random `state`,
+   stores it server-side (10-minute TTL, single-use), and redirects the
+   browser to `https://www.reddit.com/api/v1/authorize` with
+   `response_type=code`, `scope=identity`, `duration=permanent`.
+2. Reddit calls back to the registered redirect URI. The app validates
+   and consumes `state` first — an invalid, missing, or reused state
+   returns 400 without touching the code — then exchanges the code at
+   `https://www.reddit.com/api/v1/access_token` (HTTP Basic auth with
+   client ID/secret, exact redirect URI resent).
+3. The app fetches the authenticated identity from
+   `https://oauth.reddit.com/api/v1/me` (Bearer token). The username
+   comes from this response — never from callback query params.
+4. Tokens are stored server-side in SQLite; the `/discovery` page shows
+   the connected account and a Disconnect button.
+
+**Minimal scopes.** The app requests only the `identity` scope — the
+minimum required by current functionality. `identity` lets
+`/api/v1/me` return the authenticated username; no posting,
+commenting, voting, or messaging scopes are requested. If a future
+stage needs authenticated reads with the user token, the scope set
+will be expanded deliberately and the user will re-authorize.
+
+**Tokens and storage limits.** Access tokens expire after one hour;
+`duration=permanent` returns a refresh token, which the service
+exchanges automatically when a token is near expiry (60s margin). Tokens
+are stored in **plaintext SQLite** — this is ordinary database storage,
+not encrypted secret storage. Do not deploy this on shared hosting
+without full-disk encryption or a proper secret store. Refresh tokens
+can be revoked by the user at any time from
+https://www.reddit.com/prefs/apps; Disconnect deletes the connection
+row locally.
+
+**OAuth vs discovery credentials — do not mix them up:**
+
+| | App-level (Stage 2/3) | User OAuth (Stage 4) |
+|---|---|---|
+| Reddit app type | **script** | **web** |
+| Grant | client-credentials (app-only) | authorization code (+ refresh) |
+| Env vars | `REDDIT_CLIENT_ID/SECRET/USER_AGENT` | `SCOUTNEXUS_REDDIT_CLIENT_ID/SECRET/REDIRECT_URI/USER_AGENT` |
+| Used by | discovery searches | account identity |
+| Reddit account | none | the user who clicked "Connect Reddit" |
+
+The OAuth endpoints (`https://www.reddit.com/api/v1/authorize`,
+`/api/v1/access_token`, `https://oauth.reddit.com`) are Reddit's
+officially documented OAuth2 endpoints.
+
+**Live verification: NOT VERIFIED** — no real Reddit application
+credentials were available in this environment, so the browser flow was
+not completed against Reddit. All OAuth tests use mocked HTTP
+(`httpx.MockTransport`); the server-side start/redirect/callback/state
+handling was exercised against a live local server with fake
+credentials.
+
 ## Project structure
 
 ```
@@ -284,12 +397,18 @@ opportunityscout/
   error-isolated runs, `/discovery` console and `/sources` inspection
   UI. No candidates, no campaign analysis, no scheduling. Live Reddit
   discovery was **not** verified (no credentials available).
-- **Stage 4** — AI relevance / intent analysis *(next, not started)*
-- **Stage 5** — Candidate review workflow
-- **Stage 6** — Response drafting (human-approved)
-- **Stage 7** — Additional platforms
-- **Stage 8** — Offer discovery / search
-- **Stage 9** — Optional platform publishing (human-approved)
+- **Stage 4** — Reddit OAuth account connection *(done — current)*.
+  User-authorized account link via a separate Reddit *web* app
+  (authorization-code flow, `identity` scope only), with cryptographically
+  random single-use state, server-side token storage, refresh, and
+  disconnect. Application-level discovery credentials stay separate.
+  Live OAuth flow was **not** verified (no credentials available).
+- **Stage 5** — AI relevance / intent analysis *(next, not started)*
+- **Stage 6** — Candidate review workflow
+- **Stage 7** — Response drafting (human-approved)
+- **Stage 8** — Additional platforms
+- **Stage 9** — Offer discovery / search
+- **Stage 10** — Optional platform publishing (human-approved)
 
 ## Product boundaries
 

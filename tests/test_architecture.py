@@ -118,3 +118,14 @@ def test_no_network_calls_in_discovery_service():
     text = (APP_DIR / "services" / "discovery.py").read_text()
     for banned in ("requests.", "urllib", "httpx.", "praw"):
         assert banned not in text
+
+
+def test_discovery_does_not_depend_on_user_oauth():
+    """Discovery keeps using application-level credentials.
+
+    The Stage 4 user-authorized OAuth layer (app/services/reddit_oauth.py)
+    is a separate concern; discovery must not import it.
+    """
+    text = (APP_DIR / "services" / "discovery.py").read_text()
+    assert "reddit_oauth" not in text
+    assert "RedditConnection" not in text

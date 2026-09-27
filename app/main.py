@@ -11,6 +11,9 @@ Routes:
     POST /discovery/run           -> run discovery manually (dev operation)
     GET  /sources                 -> discovered sources list
     GET  /sources/{id}            -> source detail
+    GET  /auth/reddit             -> start Reddit OAuth (redirect to Reddit)
+    GET  /auth/reddit/callback    -> Reddit OAuth callback (code exchange)
+    POST /auth/reddit/disconnect  -> remove the Reddit OAuth connection
 
 The web layer only talks to the repositories/services — never directly to
 the database engine, and never to platform APIs.
@@ -30,11 +33,20 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import Base, make_engine, make_session_factory
 from app.models import Candidate, CandidateStatus, Source
-from app.platforms import PlatformAdapter, RedditAdapter, RedditCredentialsError, reddit_status
+from app.platforms import PlatformAdapter, RedditAdapter, RedditCredentialsError, RedditError, reddit_status
 from app.repositories.candidate_repository import CandidateRepository
 from app.repositories.campaign_repository import CampaignRepository
+from app.repositories.reddit_connection_repository import RedditConnectionRepository
 from app.repositories.source_repository import SourceRepository
 from app.services.discovery import DEFAULT_DISCOVERY_TARGETS, DiscoveryService
+from app.services.reddit_oauth import (
+    OAuthStateStore,
+    RedditOAuthClient,
+    RedditOAuthConfig,
+    RedditOAuthConfigError,
+    refresh_connection,
+    token_needs_refresh,
+)
 
 APP_DIR = Path(__file__).resolve().parent
 
@@ -96,6 +108,73 @@ def get_discovery_adapter() -> PlatformAdapter | None:
         return RedditAdapter()
     except RedditCredentialsError:
         return None
+
+
+# Single-process server-side OAuth state store (see reddit_oauth.py).
+_oauth_state_store = OAuthStateStore()
+
+
+def get_oauth_config() -> RedditOAuthConfig | None:
+    """User-OAuth config, or None when not configured (clean page, not a 500)."""
+    try:
+        return RedditOAuthConfig.from_env()
+    except RedditOAuthConfigError:
+        return None
+
+
+def get_oauth_client(
+    config: RedditOAuthConfig | None = Depends(get_oauth_config),
+) -> RedditOAuthClient | None:
+    return RedditOAuthClient(config) if config is not None else None
+
+
+def get_oauth_state_store() -> OAuthStateStore:
+    return _oauth_state_store
+
+
+def get_connection_repo(db: Session = Depends(get_db)) -> RedditConnectionRepository:
+    return RedditConnectionRepository(db)
+
+
+def _oauth_setup_hint() -> str:
+    return (
+        "Register a *web* app at https://www.reddit.com/prefs/apps with redirect URI "
+        "'http://127.0.0.1:8000/auth/reddit/callback' (it must match exactly), then "
+        "copy .env.example to .env and set SCOUTNEXUS_REDDIT_CLIENT_ID, "
+        "SCOUTNEXUS_REDDIT_CLIENT_SECRET and SCOUTNEXUS_REDDIT_USER_AGENT."
+    )
+
+
+def _reddit_account_context(
+    db: Session,
+    repo: RedditConnectionRepository,
+    oauth_client: RedditOAuthClient | None,
+    oauth_config: RedditOAuthConfig | None,
+) -> dict:
+    """Template context for the Reddit account section of the console."""
+    context: dict = {
+        "connected": False,
+        "oauth_configured": oauth_config is not None,
+    }
+    connection = repo.get_active()
+    if connection is None:
+        return context
+    context["connected"] = True
+    context["username"] = connection.reddit_username
+    context["scopes"] = connection.scopes
+    context["token_state"] = "expired" if connection.is_expired() else "valid"
+    # Minimal refresh behavior: refresh only at/near expiry, then persist.
+    # A healthy token triggers no Reddit traffic at all.
+    if token_needs_refresh(connection) and oauth_client is not None:
+        try:
+            connection = refresh_connection(connection, repo, oauth_client)
+            db.commit()
+            context["token_state"] = (
+                "expired" if connection.is_expired() else "valid"
+            )
+        except RedditError:
+            db.rollback()
+    return context
 
 
 def _shared_context() -> dict:
@@ -193,7 +272,11 @@ def create_app() -> FastAPI:
     @app.get("/discovery")
     def discovery_console(
         request: Request,
+        db: Session = Depends(get_db),
         adapter: PlatformAdapter | None = Depends(get_discovery_adapter),
+        connection_repo: RedditConnectionRepository = Depends(get_connection_repo),
+        oauth_client: RedditOAuthClient | None = Depends(get_oauth_client),
+        oauth_config: RedditOAuthConfig | None = Depends(get_oauth_config),
     ):
         """Developer verification console: configured targets + manual run."""
         return templates.TemplateResponse(
@@ -202,6 +285,9 @@ def create_app() -> FastAPI:
             {
                 "targets": DEFAULT_DISCOVERY_TARGETS,
                 "adapter_configured": adapter is not None,
+                "reddit_account": _reddit_account_context(
+                    db, connection_repo, oauth_client, oauth_config
+                ),
                 **_shared_context(),
             },
         )
@@ -268,6 +354,115 @@ def create_app() -> FastAPI:
             "source_detail.html",
             {"source": source, **_shared_context()},
         )
+
+    # -- Reddit OAuth account connection (Stage 4) ---------------------------
+
+    def _auth_error(
+        request: Request, message: str, detail: str | None, status_code: int
+    ):
+        return templates.TemplateResponse(
+            request,
+            "auth_error.html",
+            {"message": message, "detail": detail, **_shared_context()},
+            status_code=status_code,
+        )
+
+    @app.get("/auth/reddit")
+    def reddit_auth_start(
+        request: Request,
+        config: RedditOAuthConfig | None = Depends(get_oauth_config),
+        store: OAuthStateStore = Depends(get_oauth_state_store),
+        repo: RedditConnectionRepository = Depends(get_connection_repo),
+    ):
+        """Start the OAuth flow: issue state server-side, redirect to Reddit."""
+        if config is None:
+            return _auth_error(
+                request,
+                "Reddit connection is not configured.",
+                _oauth_setup_hint(),
+                400,
+            )
+        if repo.get_active() is not None:
+            return RedirectResponse(url="/discovery", status_code=303)
+        state = store.issue()
+        return RedirectResponse(
+            url=RedditOAuthClient(config).authorization_url(state),
+            status_code=302,
+        )
+
+    @app.get("/auth/reddit/callback")
+    def reddit_auth_callback(
+        request: Request,
+        db: Session = Depends(get_db),
+        client: RedditOAuthClient | None = Depends(get_oauth_client),
+        store: OAuthStateStore = Depends(get_oauth_state_store),
+        repo: RedditConnectionRepository = Depends(get_connection_repo),
+    ):
+        """Handle Reddit's redirect: validate state, exchange code, store."""
+        params = request.query_params
+        if client is None:
+            return _auth_error(
+                request,
+                "Reddit connection is not configured.",
+                _oauth_setup_hint(),
+                400,
+            )
+        if params.get("error"):
+            # e.g. access_denied — the user declined on Reddit's page.
+            return _auth_error(
+                request,
+                "Reddit connection was not completed.",
+                "Authorization was not granted on Reddit.",
+                400,
+            )
+        code, state = params.get("code"), params.get("state")
+        if not code or not state:
+            return _auth_error(
+                request,
+                "Reddit connection was not completed.",
+                "The callback was missing required parameters.",
+                400,
+            )
+        if not store.consume(state):
+            # Missing, mismatched, expired, or reused state: no exchange.
+            return _auth_error(
+                request,
+                "Reddit connection was not completed.",
+                "The authorization request could not be verified. "
+                "Please try connecting again.",
+                400,
+            )
+        try:
+            tokens = client.exchange_code(code)
+            # Identity comes from Reddit's authenticated endpoint, never
+            # from callback query parameters.
+            identity = client.fetch_identity(tokens.access_token)
+        except RedditError as exc:
+            # OAuth error messages are secret-free by construction.
+            return _auth_error(
+                request, "Reddit connection was not completed.", str(exc), 502
+            )
+        repo.upsert(
+            reddit_username=identity["name"],
+            access_token=tokens.access_token,
+            refresh_token=tokens.refresh_token,
+            token_expires_at=tokens.expires_at,
+            scopes=tokens.scopes,
+        )
+        db.commit()
+        return RedirectResponse(url="/discovery", status_code=303)
+
+    @app.post("/auth/reddit/disconnect")
+    def reddit_disconnect(
+        db: Session = Depends(get_db),
+        repo: RedditConnectionRepository = Depends(get_connection_repo),
+    ):
+        """Remove the stored Reddit connection (tokens are discarded)."""
+        connection = repo.get_active()
+        if connection is not None:
+            repo.delete(connection)
+            db.commit()
+        return RedirectResponse(url="/discovery", status_code=303)
 
     @app.exception_handler(404)
     async def not_found_handler(request: Request, exc: HTTPException):

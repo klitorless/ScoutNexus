@@ -70,3 +70,50 @@ class PlatformAdapter(ABC):
     def build_url(self, source_id: str) -> str:
         """Build the canonical public URL for a post."""
         raise NotImplementedError
+
+
+# ---------------------------------------------------------------------------
+# Shared Reddit error vocabulary.
+#
+# These live here (not in a specific adapter) so every Reddit-facing layer —
+# the Stage 2/3 application-level adapter and the Stage 4 user-OAuth flow —
+# raises the same error types without services importing a platform
+# implementation module. app/platforms/reddit.py re-exports them for
+# backward compatibility.
+# ---------------------------------------------------------------------------
+
+
+class RedditError(Exception):
+    """Base class for all Reddit API errors."""
+
+
+class RedditCredentialsError(RedditError):
+    """Credentials are missing or incomplete."""
+
+
+class RedditAuthError(RedditError):
+    """Authentication failed (bad client_id/secret, rejected token)."""
+
+
+class RedditRateLimitError(RedditError):
+    """Reddit returned HTTP 429. Back off; do NOT retry aggressively."""
+
+    def __init__(self, message: str, retry_after: float | None = None):
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
+class RedditAPIError(RedditError):
+    """Reddit returned an unexpected HTTP error."""
+
+    def __init__(self, message: str, status_code: int | None = None):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+class RedditNetworkError(RedditError):
+    """Transport-level failure: timeout, DNS, connection reset, ..."""
+
+
+class RedditResponseError(RedditError):
+    """Reddit returned something we could not parse (malformed JSON/shape)."""

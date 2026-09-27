@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Reddit connection — ScoutNexus{% endblock %}
+{% block content %}
+<h1>Reddit connection</h1>
+<article class="card">
+  <p><strong>{{ message }}</strong></p>
+  {% if detail %}<p class="muted">{{ detail }}</p>{% endif %}
+</article>
+<p><a href="/discovery">← Back to the discovery console</a></p>
+{% endblock %}

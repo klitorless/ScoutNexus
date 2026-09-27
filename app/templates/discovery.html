@@ -23,6 +23,28 @@ candidates and never runs campaign analysis.</p>
 </article>
 {% endfor %}
 
+<h2>Reddit account</h2>
+{% if reddit_account.connected %}
+<article class="card">
+  <div class="card-meta"><span class="badge status-new">CONNECTED</span></div>
+  <p><strong>Account:</strong> u/{{ reddit_account.username }}</p>
+  <dl class="facts">
+    <dt>Status</dt><dd>{% if reddit_account.token_state == "valid" %}Token valid{% else %}Token expired — please reconnect{% endif %}</dd>
+    <dt>Scopes</dt><dd>{{ reddit_account.scopes or "—" }}</dd>
+  </dl>
+  <form method="post" action="/auth/reddit/disconnect"><button class="btn" type="submit">Disconnect Reddit</button></form>
+</article>
+<p class="muted">Discovery keeps using application-level credentials. The connected
+account identifies the user and is reserved for future stages.</p>
+{% elif reddit_account.oauth_configured %}
+<p class="muted">Connect your Reddit account via OAuth (identity scope only — no posting).</p>
+<p><a class="btn primary" href="/auth/reddit">Connect Reddit</a></p>
+{% else %}
+<p class="muted">Reddit OAuth is <strong>not configured</strong> — connect is unavailable until
+<code>SCOUTNEXUS_REDDIT_CLIENT_ID</code>, <code>SCOUTNEXUS_REDDIT_CLIENT_SECRET</code> and
+<code>SCOUTNEXUS_REDDIT_USER_AGENT</code> are set (copy <code>.env.example</code> to <code>.env</code>).</p>
+{% endif %}
+
 <h2>Manual run</h2>
 {% if adapter_configured %}
 <p class="muted">Runs all enabled targets now, in this request. No scheduling, no background workers.</p>

@@ -37,7 +37,30 @@ from typing import Any
 import httpx
 from dotenv import load_dotenv
 
-from app.platforms.base import NormalizedSource, PlatformAdapter
+from app.platforms.base import (
+    NormalizedSource,
+    PlatformAdapter,
+    RedditAPIError,
+    RedditAuthError,
+    RedditCredentialsError,
+    RedditError,
+    RedditNetworkError,
+    RedditRateLimitError,
+    RedditResponseError,
+)
+
+# Re-exported so existing imports (app.platforms.reddit / app.platforms)
+# keep working; the classes are defined in app.platforms.base.
+__all__ = [
+    "RedditAdapter",
+    "RedditAPIError",
+    "RedditAuthError",
+    "RedditCredentialsError",
+    "RedditError",
+    "RedditNetworkError",
+    "RedditRateLimitError",
+    "RedditResponseError",
+]
 
 log = logging.getLogger(__name__)
 
@@ -52,47 +75,6 @@ PUBLIC_BASE_URL = "https://www.reddit.com"
 
 _SEARCH_SORTS = frozenset({"relevance", "new", "hot", "top", "comments"})
 _TIME_FILTERS = frozenset({"hour", "day", "week", "month", "year", "all"})
-
-
-# ---------------------------------------------------------------------------
-# Errors — explicit, debuggable, never carrying secrets.
-# ---------------------------------------------------------------------------
-
-
-class RedditError(Exception):
-    """Base class for all Reddit adapter errors."""
-
-
-class RedditCredentialsError(RedditError):
-    """Credentials are missing or incomplete."""
-
-
-class RedditAuthError(RedditError):
-    """Authentication failed (bad client_id/secret, rejected token)."""
-
-
-class RedditRateLimitError(RedditError):
-    """Reddit returned HTTP 429. Back off; do NOT retry aggressively."""
-
-    def __init__(self, message: str, retry_after: float | None = None):
-        super().__init__(message)
-        self.retry_after = retry_after
-
-
-class RedditAPIError(RedditError):
-    """Reddit returned an unexpected HTTP error."""
-
-    def __init__(self, message: str, status_code: int | None = None):
-        super().__init__(message)
-        self.status_code = status_code
-
-
-class RedditNetworkError(RedditError):
-    """Transport-level failure: timeout, DNS, connection reset, ..."""
-
-
-class RedditResponseError(RedditError):
-    """Reddit returned something we could not parse (malformed JSON/shape)."""
 
 
 # ---------------------------------------------------------------------------
