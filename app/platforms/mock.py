@@ -113,7 +113,9 @@ class MockRedditAdapter(PlatformAdapter):
     def __init__(self) -> None:
         self._posts = _demo_posts()
 
-    def discover(self, query: str, limit: int = 25) -> list[NormalizedSource]:
+    def discover(
+        self, query: str, limit: int = 25, **options: Any
+    ) -> list[NormalizedSource]:
         tokens = [t for t in query.lower().split() if len(t) > 2]
         ranked: list[tuple[int, dict[str, Any]]] = []
         for post in self._posts:

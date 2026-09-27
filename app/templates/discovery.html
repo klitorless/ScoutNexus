@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Discovery — ScoutNexus{% endblock %}
+{% block content %}
+<h1>Discovery Console</h1>
+<p class="muted">Developer verification console. Discovery finds and stores
+<strong>Sources</strong> — raw posts from configured searches. It never creates
+candidates and never runs campaign analysis.</p>
+
+<h2>Configured targets</h2>
+{% for t in targets %}
+<article class="card">
+  <div class="card-meta">
+    <span class="badge platform">{{ t.platform|upper }}</span>
+    {% if t.enabled %}<span class="badge status-new">ENABLED</span>{% else %}<span class="badge status-dismissed">DISABLED</span>{% endif %}
+  </div>
+  <p><strong>Query:</strong> {{ t.query }}</p>
+  <dl class="facts">
+    <dt>Community</dt><dd>{% if t.community %}r/{{ t.community }}{% else %}site-wide{% endif %}</dd>
+    <dt>Limit</dt><dd>{{ t.limit }}</dd>
+    <dt>Sort</dt><dd>{{ t.sort }}</dd>
+    <dt>Time filter</dt><dd>{{ t.time_filter }}</dd>
+  </dl>
+</article>
+{% endfor %}
+
+<h2>Manual run</h2>
+{% if adapter_configured %}
+<p class="muted">Runs all enabled targets now, in this request. No scheduling, no background workers.</p>
+<form method="post" action="/discovery/run"><button class="btn primary" type="submit">Run discovery now</button></form>
+{% else %}
+<p class="muted">Reddit is <strong>not configured</strong> — discovery cannot run until
+<code>REDDIT_CLIENT_ID</code>, <code>REDDIT_CLIENT_SECRET</code> and
+<code>REDDIT_USER_AGENT</code> are set (copy <code>.env.example</code> to <code>.env</code>).</p>
+{% endif %}
+
+<p><a href="/sources">Inspect discovered sources →</a></p>
+{% endblock %}

@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}{{ source.title or "Source" }} — ScoutNexus{% endblock %}
+{% block content %}
+<p><a href="/sources">← Back to sources</a></p>
+
+<article class="card detail">
+  <div class="card-meta">
+    <span class="badge platform">{{ source.platform|upper }}</span>
+    {% if source.community %}<span class="community">r/{{ source.community }}</span>{% endif %}
+  </div>
+  <h1>{{ source.title or "(untitled)" }}</h1>
+  <p class="byline">u/{{ source.author or "unknown" }} · posted {{ source.posted_at|timeago }} · discovered {{ source.created_at|timeago }}</p>
+
+  <dl class="facts">
+    <dt>Platform</dt><dd>{{ source.platform }}</dd>
+    <dt>Source ID</dt><dd><code>{{ source.source_id }}</code></dd>
+    <dt>Engagement</dt>
+    <dd>
+      {% if source.engagement %}
+        {% for k, v in source.engagement.items() %}{{ k }}: {{ v }}{% if not loop.last %} · {% endif %}{% endfor %}
+      {% else %}unknown{% endif %}
+    </dd>
+    <dt>Original URL</dt>
+    <dd>{% if source.url %}<a href="{{ source.url }}" target="_blank" rel="noopener">{{ source.url }}</a>{% else %}—{% endif %}</dd>
+  </dl>
+
+  {% if source.content %}
+  <h2>Post content</h2>
+  <p class="fulltext">{{ source.content }}</p>
+  {% endif %}
+
+  <div class="actions">
+    {% if source.url %}<a class="btn" href="{{ source.url }}" target="_blank" rel="noopener">Open Original Post</a>{% endif %}
+  </div>
+</article>
+{% endblock %}

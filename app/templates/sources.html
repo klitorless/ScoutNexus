@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Sources — ScoutNexus{% endblock %}
+{% block content %}
+<h1>Discovered Sources</h1>
+<p class="muted">Raw posts found by discovery. These are <strong>not</strong>
+candidates — no relevance analysis has been applied.</p>
+
+{% if not sources %}
+<p class="muted">No sources yet. Run <a href="/discovery">discovery</a> or
+<code>python scripts/seed_demo.py</code> to populate some.</p>
+{% endif %}
+
+{% for s in sources %}
+<article class="card">
+  <div class="card-meta">
+    <span class="badge platform">{{ s.platform|upper }}</span>
+    {% if s.community %}<span class="community">r/{{ s.community }}</span>{% endif %}
+  </div>
+  <h2 class="card-title"><a href="/sources/{{ s.id }}">{{ s.title or "(untitled)" }}</a></h2>
+  <p class="byline">u/{{ s.author or "unknown" }} · posted {{ s.posted_at|timeago }} · discovered {{ s.created_at|timeago }}
+    {% if s.comment_count() is not none %}· {{ s.comment_count() }} comments{% endif %}
+  </p>
+  {% if s.content %}<p class="preview">{{ s.content[:220] }}{% if s.content|length > 220 %}…{% endif %}</p>{% endif %}
+  <div class="actions">
+    {% if s.url %}<a class="btn" href="{{ s.url }}" target="_blank" rel="noopener">Open Post</a>{% endif %}
+    <a class="btn" href="/sources/{{ s.id }}">Details</a>
+  </div>
+</article>
+{% endfor %}
+{% endblock %}

@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Discovery result — ScoutNexus{% endblock %}
+{% block content %}
+<h1>Discovery result</h1>
+
+{% if config_error %}
+<div class="card">
+  <p><strong>Discovery did not run.</strong></p>
+  <p class="muted">{{ config_error }}</p>
+</div>
+{% else %}
+<article class="card">
+  <div class="card-meta">
+    {% if result.ok %}<span class="badge status-new">OK</span>{% else %}<span class="badge status-dismissed">WITH ERRORS</span>{% endif %}
+  </div>
+  <dl class="facts">
+    <dt>Targets attempted</dt><dd>{{ result.targets_attempted }}</dd>
+    <dt>Targets skipped</dt><dd>{{ result.targets_skipped }}</dd>
+    <dt>Sources seen</dt><dd>{{ result.sources_seen }}</dd>
+    <dt>New sources created</dt><dd>{{ result.sources_created }}</dd>
+    <dt>Duplicates</dt><dd>{{ result.duplicates }}</dd>
+  </dl>
+</article>
+
+{% if result.errors %}
+<h2>Target errors</h2>
+{% for e in result.errors %}
+<article class="card">
+  <p><strong>{{ e.target }}</strong></p>
+  <p class="muted">{{ e.error }}</p>
+</article>
+{% endfor %}
+{% endif %}
+{% endif %}
+
+<p><a href="/sources">Inspect discovered sources →</a></p>
+<p><a href="/discovery">← Back to discovery console</a></p>
+{% endblock %}

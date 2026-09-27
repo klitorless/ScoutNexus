@@ -7,6 +7,10 @@ Routes:
     POST /candidates/{id}/review  -> mark candidate REVIEWED
     POST /candidates/{id}/dismiss -> mark candidate DISMISSED
     GET  /campaigns               -> campaign list
+    GET  /discovery               -> discovery console (configured targets)
+    POST /discovery/run           -> run discovery manually (dev operation)
+    GET  /sources                 -> discovered sources list
+    GET  /sources/{id}            -> source detail
 
 The web layer only talks to the repositories/services — never directly to
 the database engine, and never to platform APIs.
@@ -25,10 +29,12 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import Base, make_engine, make_session_factory
-from app.models import Candidate, CandidateStatus
-from app.platforms import reddit_status
+from app.models import Candidate, CandidateStatus, Source
+from app.platforms import PlatformAdapter, RedditAdapter, RedditCredentialsError, reddit_status
 from app.repositories.candidate_repository import CandidateRepository
 from app.repositories.campaign_repository import CampaignRepository
+from app.repositories.source_repository import SourceRepository
+from app.services.discovery import DEFAULT_DISCOVERY_TARGETS, DiscoveryService
 
 APP_DIR = Path(__file__).resolve().parent
 
@@ -74,6 +80,22 @@ def get_candidate_repo(db: Session = Depends(get_db)) -> CandidateRepository:
 
 def get_campaign_repo(db: Session = Depends(get_db)) -> CampaignRepository:
     return CampaignRepository(db)
+
+
+def get_source_repo(db: Session = Depends(get_db)) -> SourceRepository:
+    return SourceRepository(db)
+
+
+def get_discovery_adapter() -> PlatformAdapter | None:
+    """Reddit adapter for manual discovery runs, or None when unconfigured.
+
+    Returns None instead of raising so the discovery console can explain
+    missing credentials with a clean page rather than a 500.
+    """
+    try:
+        return RedditAdapter()
+    except RedditCredentialsError:
+        return None
 
 
 def _shared_context() -> dict:
@@ -166,6 +188,85 @@ def create_app() -> FastAPI:
             request,
             "campaigns.html",
             {"campaigns": campaigns, **_shared_context()},
+        )
+
+    @app.get("/discovery")
+    def discovery_console(
+        request: Request,
+        adapter: PlatformAdapter | None = Depends(get_discovery_adapter),
+    ):
+        """Developer verification console: configured targets + manual run."""
+        return templates.TemplateResponse(
+            request,
+            "discovery.html",
+            {
+                "targets": DEFAULT_DISCOVERY_TARGETS,
+                "adapter_configured": adapter is not None,
+                **_shared_context(),
+            },
+        )
+
+    @app.post("/discovery/run")
+    def discovery_run(
+        request: Request,
+        db: Session = Depends(get_db),
+        adapter: PlatformAdapter | None = Depends(get_discovery_adapter),
+    ):
+        """Manual discovery run (dev operation — no scheduling, no workers).
+
+        Persists discovered posts as Sources only. Never creates
+        candidates and never runs campaign analysis.
+        """
+        if adapter is None:
+            return templates.TemplateResponse(
+                request,
+                "discovery_result.html",
+                {
+                    "result": None,
+                    "config_error": (
+                        "Reddit is not configured. Copy .env.example to .env "
+                        "and fill in REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET "
+                        "and REDDIT_USER_AGENT, then run again."
+                    ),
+                    **_shared_context(),
+                },
+            )
+        service = DiscoveryService(
+            adapter, SourceRepository(db), CandidateRepository(db)
+        )
+        result = service.run_discovery(DEFAULT_DISCOVERY_TARGETS)
+        db.commit()
+        return templates.TemplateResponse(
+            request,
+            "discovery_result.html",
+            {"result": result, "config_error": None, **_shared_context()},
+        )
+
+    @app.get("/sources")
+    def source_list(
+        request: Request,
+        repo: SourceRepository = Depends(get_source_repo),
+    ):
+        sources = repo.list()
+        return templates.TemplateResponse(
+            request,
+            "sources.html",
+            {"sources": sources, **_shared_context()},
+        )
+
+    @app.get("/sources/{source_id}")
+    def source_detail(
+        request: Request,
+        source_id: int,
+        repo: SourceRepository = Depends(get_source_repo),
+    ):
+        source: Source | None = repo.get(source_id)
+        if source is None:
+            raise HTTPException(status_code=404, detail="Source not found")
+        return templates.TemplateResponse(
+            request,
+            "source_detail.html",
+            {"source": source, **_shared_context()},
         )
 
     @app.exception_handler(404)

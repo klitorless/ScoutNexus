@@ -39,8 +39,16 @@ class PlatformAdapter(ABC):
     platform: str = "base"
 
     @abstractmethod
-    def discover(self, query: str, limit: int = 25) -> list[NormalizedSource]:
-        """Find recent posts/threads relevant to `query`."""
+    def discover(
+        self, query: str, limit: int = 25, **options: Any
+    ) -> list[NormalizedSource]:
+        """Find recent posts/threads relevant to `query`.
+
+        `options` carries platform-specific search knobs (e.g. subreddit,
+        sort, time_filter for Reddit). Adapters ignore options they do
+        not understand. Core code passes these through opaquely — it must
+        never import a platform's implementation to build them.
+        """
         raise NotImplementedError
 
     @abstractmethod
